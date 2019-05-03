@@ -1,0 +1,322 @@
+---
+title: 'Cousera 06: Practical Machine Learning'
+author: "DatSci007"
+date: "3 Mai 2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 00_Information
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively
+inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves
+regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is
+quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data
+from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly
+in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har
+(see the section on the Weight Lifting Exercise Dataset).
+
+# 01_Prep
+
+load packages and customized functions if neccessary
+
+```{r echo = FALSE, include = FALSE}
+
+rm(list = ls()); gc()
+
+
+fct_corel <- function(data, varnames, threshold = 0.5) {
+  th_positive <- threshold
+  th_negative <- -1 * threshold
+  mycor <- cor(data[varnames])
+  diag(mycor) <- NA
+  badmaxs <- apply(mycor, 1, max, na.rm = TRUE) > th_positive
+  badmins <- apply(mycor, 1, min, na.rm = TRUE) < th_negative
+  bad <- badmaxs | badmins
+  mycor <- mycor[bad, bad]
+  mycor <- round(mycor, 2)
+  return(mycor)
+}
+
+
+# load libraries
+fct_package <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg)) 
+    install.packages(new.pkg, dependencies = TRUE)
+  sapply(pkg, require, character.only = TRUE)
+}
+
+# usage
+List_packages <- c("tidyverse", "dplyr", "AppliedPredictiveModeling", "caret", "ElemStatLearn", "pgmm", "rpart", "gbm", "lubridate", "forecast", "randomForest", "data.table", "xgboost", "naivebayes", "rattle", "DiagrammeR", "pROC", "formattable", "corrgram")
+fct_package(List_packages)
+
+# install.packages("devtools") 
+# library(devtools) 
+# install_github("AppliedDataSciencePartners/xgboostExplainer")
+# library(xgboostExplainer)
+
+```
+
+
+
+# 02_Analysis
+
+http://groupware.les.inf.puc-rio.br/har
+
+This human activity recognition research has traditionally focused on discriminating between different activities, i.e. to predict "which" activity was performed at a specific point in time (like with the Daily Living Activities dataset above). The approach we propose for the Weight Lifting Exercises dataset is to investigate "how (well)" an activity was performed by the wearer. The "how (well)" investigation has only received little attention so far, even though it potentially provides useful information for a large variety of applications,such as sports training.
+
+In this work (see the paper) we first define quality of execution and investigate three aspects that pertain to qualitative activity recognition: the problem of specifying correct execution, the automatic and robust detection of execution mistakes, and how to provide feedback on the quality of execution to the user. We tried out an on-body sensing approach (dataset here), but also an "ambient sensing approach" (by using Microsoft Kinect - dataset still unavailable)
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg).
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz5mqflBUdB
+
+## 02_01_Cleaning
+
+Load the data (test and train)
+Note: Y we want to predict using all other vars is "classe". This variable is missing in dat_test_raw, because that's the variable we want to predict afterwards.
+
+```{r echo = FALSE}
+
+### get data
+dat_train_raw <- as.data.frame(data.table::fread("pml-training.csv"))
+dat_test_raw <- as.data.frame(data.table::fread("pml-testing.csv"))
+
+```
+
+First step is data prep. 
+Chance the class of our DV into factor, so it's easier to calculate the confusion matrix later on.
+Then we exclude all variables with a variance of nearly zero and all variables with more than 95% of missings. 
+
+```{r echo = FALSE}
+
+### as factor
+dat_train_raw$classe <- as.factor(dat_train_raw$classe)
+
+
+dat_train <- dat_train_raw
+
+### which are the vars with nearly zero variance? --> we'll exclude them 
+List_ZeroVar <- names(dat_train_raw)[nearZeroVar(dat_train_raw)]
+List_MostNA <- data.frame(Sum_NA = colMeans(is.na(dat_train_raw)))
+List_MostNA$col <- rownames(List_MostNA)
+List_MostNA <- List_MostNA %>% 
+  dplyr::filter(Sum_NA > .95) %>% # select all vars with only NA
+  dplyr::select(col) %>% 
+  t() %>% # transpond so it will be a vector 
+  as.character()
+
+```
+
+After this cleaning step 55 variables including name of participant, num_window and classe.
+
+```{r warning = FALSE}
+
+dim(dat_train_raw)
+dat_train_raw <- dat_train_raw %>% 
+  dplyr::select(-dplyr::one_of(List_ZeroVar, List_MostNA), # delete them with sum NA > 95% and them with nearly zero veraiance
+                -c(V1, dplyr::contains("timestamp"))) # other vars without useful information
+dim(dat_train_raw)
+# now we have 55 cols to work with
+
+```
+
+
+## 02_02_Splitting
+
+After the cleaning is done, divide the dat_train_raw into one test (don't get confused with dat_test_raw) and one training sample.
+We use 75% for training and 25% for testing
+
+```{r echo = FALSE}
+
+set.seed(7353)
+
+### split train data in test and train FOR MODELING
+inTrain <-  createDataPartition(dat_train_raw$classe, p = 3/4)[[1]]
+dat_train <-  dat_train_raw[ inTrain,]
+dat_test <-  dat_train_raw[-inTrain,]
+
+dim(dat_train)
+dim(dat_test)
+
+```
+
+## 02_03_Vizualisation
+
+let's have a closer look on the data. By calculating the correlation of all variables we notice, that there are some highlig correlated variables.
+Our plot proofs it. 
+
+```{r echo = FALSE}
+
+### still too many vars 
+corrgram(dat_train[,-c(1, 2)], order = TRUE, lower.panel = panel.pie)
+
+### let's get the correltaion of each pair
+# dat_num <- dat_train[, -c(1, 2, 55)]
+# List_Names <- colnames(dat_num)
+# Correl_num <- fct_corel(dat_num, List_Names, threshold = 0.8)
+
+
+```
+
+On top of that, the number of variables might be too high, so let's use principal component analysis to reduce the number of variables.
+We need only 12 components to explain at leat 80% of the variance.
+
+```{r echo = FALSE}
+
+set.seed(7353)
+
+### how many components do we need?
+preProcess(dat_train[, -c(1, 2, 55)], method = 'pca', thresh = 0.8)
+
+
+```
+
+## 02_04 Modeling
+
+Finaly the fun part begins :)
+Methods we want to use:
+  1) rpart (Regression Tree)
+  2) naive_bayes (Naive Bayes)
+  3) xgbTree (XGBoost)
+  4) stack (Combination of three methods above)
+
+For every method we stop the running time and calcuate the accuracy/error in order to compare them.  
+
+### 02_04_01 rpart
+
+We try both approaches, one with pca and one without pca.
+But we notice, that the approach with pca (accuracy = 0.36) performs much worse than the approach without pca (accuracy = 0.56). so let's drop this approach for the other methods.
+
+
+```{r warning = FALSE}
+
+start_pca_rpart <- proc.time()
+model_pca_rpart <- caret::train(dat_train[, -c(1, 2, 55)], dat_train$classe, method = "rpart",  
+                                preProcess = "pca", 
+                                trControl = trainControl(preProcOptions = list(thresh = 0.8)))
+end_pca_rpart <- proc.time()
+pred_pca_rpart <- predict(model_pca_rpart, dat_test)
+confusionMatrix(dat_test$classe, pred_pca_rpart)$overall['Accuracy']
+### using pca result in bad prediction --> don't use it
+
+
+### model we test
+start_rpart <- proc.time()
+model_rpart <- caret::train(dat_train[, -c(1, 2, 55)], dat_train$classe, method = "rpart",
+                            trControl = trainControl(method = "cv", number = 5))
+end_rpart <- proc.time()
+pred_rpart <- predict(model_rpart, dat_test)
+(conf_rpart <- confusionMatrix(dat_test$classe, pred_rpart)$overall['Accuracy'])
+
+```
+
+### 02_04_02 naive_bayes
+
+Naive Bayes performs much better than rpart with an accuracy of 0.74 
+
+```{r warning = FALSE}
+
+start_naive_bayes <- proc.time()
+model_naive_bayes <- caret::train(dat_train[, -c(1, 2, 55)], dat_train$classe, method = "naive_bayes",
+                                  trControl = trainControl(method = "cv", number = 5))
+end_naive_bayes <- proc.time()
+
+pred_naive_bayes <- predict(model_naive_bayes, dat_test)
+(conf_naive_bayes <- confusionMatrix(dat_test$classe, pred_naive_bayes)$overall['Accuracy'])
+
+
+```
+
+
+### 02_04_03 xgbTree
+
+xgbTree delivers nealy perfect prediction on our test sample with an accuracy of 0.996.
+
+```{r warning = FALSE}
+
+# setup
+grid_default <- expand.grid(nrounds = 100,  max_depth = 6, eta = 0.2,   gamma = 0,   colsample_bytree = 0.7,  min_child_weight = 1,  subsample = 0.7)
+train_control <- caret::trainControl(method = "none", verboseIter = FALSE, allowParallel = TRUE)
+
+start_xgb <- proc.time()
+model_xgb <- caret::train(x = dat_train[, -c(1, 2, 55)], y = dat_train$classe,
+                          trControl = train_control, tuneGrid = grid_default,
+                          method = "xgbTree", verbose = TRUE)
+end_xgb <- proc.time()
+
+pred_xgb <- predict(model_xgb, dat_test)
+(conf_xgb <- confusionMatrix(dat_test$classe, pred_xgb)$overall['Accuracy'])
+
+
+```
+
+### 02_04_04 stack
+
+xgBoost on its own performs outstanding. therefora combining all three methods won't result in better precidtion.
+
+```{r echo = FALSE}
+
+
+# stack 
+dat_stack <- data.frame(pred_rpart, pred_naive_bayes, pred_xgb , classe = dat_test$classe)
+model_stack <- randomForest(classe ~., data = dat_stack)
+pred_stack <- predict(model_stack, dat_test)
+
+(conf_stack <- confusionMatrix(dat_test$classe, pred_stack)$overall['Accuracy'])
+
+
+```
+
+### 02_05_Conclusion
+
+The runningtime of xgbTree with 0.185 minutes is higher than the running time of rpart (0.089) and naive_bayes (0.065).
+Nevertheless, xgbTree delivers nearly 100% accuracy and performs way better than rpart and naive bayes. 
+We don't get any furhter improvements by stacking the three methods.
+
+```{r echo = FALSE}
+
+# calculate running time of each algorithm
+time_rpart <- (end_rpart - start_rpart)[3]/60
+time_naive_bayes <- (end_naive_bayes - start_naive_bayes)[3]/60
+time_xgb <- (end_xgb - start_xgb)[3]/60
+
+### calculate error of each method
+error_stack <- 1 - as.numeric(conf_stack)
+error_rpart <- 1 - as.numeric(conf_rpart)
+error_naive_bayes <- 1 - as.numeric(conf_naive_bayes)
+error_xgb <- 1 - as.numeric(conf_xgb)
+
+
+(tab <- data.frame(method = c("rpart", "naive_bayes", "xgbTree", "stack: rpart + naive_bayes + xgbTree"), 
+                  time = format(c(time_rpart, time_naive_bayes, time_xgb, NA), digits = 2),
+                  accuracy = format(c(conf_rpart, conf_naive_bayes, conf_xgb, conf_stack), digits = 2), 
+                  error = format(c(error_rpart, error_naive_bayes, error_xgb, error_stack), digits = 2)))
+
+  
+
+```
+
+
+### 02_06_Prediction on Test data wihout class information
+
+For the final prediction of our 20 new observation we use the model of xgbTree.
+
+
+```{r}
+
+predict(model_xgb, dat_test_raw[, -c(1, 2, 55)])
+
+```
+
+
+# END
+
