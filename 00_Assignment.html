@@ -193,7 +193,7 @@ $(document).ready(function () {
 
 <div id="information" class="section level1">
 <h1>00_Information</h1>
-<p>Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <a href="http://groupware.les.inf.puc-rio.br/har" class="uri">http://groupware.les.inf.puc-rio.br/har</a> (see the section on the Weight Lifting Exercise Dataset).</p>
+<p>Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement â a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <a href="http://groupware.les.inf.puc-rio.br/har" class="uri">http://groupware.les.inf.puc-rio.br/har</a> (see the section on the Weight Lifting Exercise Dataset).</p>
 </div>
 <div id="prep" class="section level1">
 <h1>01_Prep</h1>
@@ -245,7 +245,8 @@ dim(dat_train_raw)</code></pre>
 <div id="modeling" class="section level2">
 <h2>02_04 Modeling</h2>
 <p>Finaly the fun part begins :) Methods we want to use: 1) rpart (Regression Tree) 2) naive_bayes (Naive Bayes) 3) xgbTree (XGBoost) 4) stack (Combination of three methods above)</p>
-<p>For every method we stop the running time and calcuate the accuracy/error in order to compare them.</p>
+<p>For every method we stop the running time and calcuate the accuracy/error in order to compare them.<br />
+We use 5-k-crossvalidation in order to avoid over-fitting, but still expect the out-of-sample (test) error to be higher then the training error.</p>
 <div id="rpart" class="section level3">
 <h3>02_04_01 rpart</h3>
 <p>We try both approaches, one with pca and one without pca. But we notice, that the approach with pca (accuracy = 0.36) performs much worse than the approach without pca (accuracy = 0.56). so let’s drop this approach for the other methods.</p>
@@ -268,6 +269,11 @@ model_rpart &lt;- caret::train(dat_train[, -c(1, 2, 55)], dat_train$classe, meth
 end_rpart &lt;- proc.time()
 pred_rpart &lt;- predict(model_rpart, dat_test)
 (conf_rpart &lt;- confusionMatrix(dat_test$classe, pred_rpart)$overall['Accuracy'])</code></pre>
+<pre><code>##  Accuracy 
+## 0.4971452</code></pre>
+<pre class="r"><code>model_rpart_wo_cv &lt;- caret::train(dat_train[, -c(1, 2, 55)], dat_train$classe, method = &quot;rpart&quot;)
+pred_rpart_wo_cv &lt;- predict(model_rpart_wo_cv, dat_test)
+(conf_rpart_wo_cv &lt;- confusionMatrix(dat_test$classe, pred_rpart_wo_cv)$overall['Accuracy'])</code></pre>
 <pre><code>##  Accuracy 
 ## 0.4971452</code></pre>
 </div>
@@ -300,22 +306,28 @@ end_xgb &lt;- proc.time()
 pred_xgb &lt;- predict(model_xgb, dat_test)
 (conf_xgb &lt;- confusionMatrix(dat_test$classe, pred_xgb)$overall['Accuracy'])</code></pre>
 <pre><code>##  Accuracy 
-## 0.9961256</code></pre>
+## 0.9965334</code></pre>
 </div>
 <div id="stack" class="section level3">
 <h3>02_04_04 stack</h3>
 <p>xgBoost on its own performs outstanding. therefora combining all three methods won’t result in better precidtion.</p>
+<pre class="r"><code># stack 
+dat_stack &lt;- data.frame(pred_rpart, pred_naive_bayes, pred_xgb , classe = dat_test$classe)
+model_stack &lt;- randomForest(classe ~., data = dat_stack)
+pred_stack &lt;- predict(model_stack, dat_test)
+
+(conf_stack &lt;- confusionMatrix(dat_test$classe, pred_stack)$overall['Accuracy'])</code></pre>
 <pre><code>##  Accuracy 
-## 0.9961256</code></pre>
+## 0.9942904</code></pre>
 </div>
 <div id="conclusion" class="section level3">
 <h3>02_05_Conclusion</h3>
 <p>The runningtime of xgbTree with 0.185 minutes is higher than the running time of rpart (0.089) and naive_bayes (0.065). Nevertheless, xgbTree delivers nearly 100% accuracy and performs way better than rpart and naive bayes. We don’t get any furhter improvements by stacking the three methods.</p>
 <pre><code>##                                 method  time accuracy  error
-## 1                                rpart 0.071     0.50 0.5029
-## 2                          naive_bayes 0.052     0.75 0.2527
-## 3                              xgbTree 0.162     1.00 0.0039
-## 4 stack: rpart + naive_bayes + xgbTree    NA     1.00 0.0039</code></pre>
+## 1                                rpart 0.083     0.50 0.5029
+## 2                          naive_bayes 0.063     0.75 0.2527
+## 3                              xgbTree 0.167     1.00 0.0035
+## 4 stack: rpart + naive_bayes + xgbTree    NA     0.99 0.0057</code></pre>
 </div>
 <div id="prediction-on-test-data-wihout-class-information" class="section level3">
 <h3>02_06_Prediction on Test data wihout class information</h3>

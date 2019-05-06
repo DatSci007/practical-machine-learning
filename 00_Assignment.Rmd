@@ -151,8 +151,7 @@ dim(dat_test)
 
 ## 02_03_Vizualisation
 
-let's have a closer look on the data. By calculating the correlation of all variables we notice, that there are some highlig correlated variables.
-Our plot proofs it. 
+let's have a closer look on the data. By calculating the correlation of all variables we notice, that there are some highlig correlated variables. Our plot proofs it. 
 
 ```{r echo = FALSE}
 
@@ -190,11 +189,12 @@ Methods we want to use:
   4) stack (Combination of three methods above)
 
 For every method we stop the running time and calcuate the accuracy/error in order to compare them.  
+We use 5-k-crossvalidation in order to avoid over-fitting, but still expect the out-of-sample (test) error to be higher then the training error.
 
 ### 02_04_01 rpart
 
 We try both approaches, one with pca and one without pca.
-But we notice, that the approach with pca (accuracy = 0.36) performs much worse than the approach without pca (accuracy = 0.56). so let's drop this approach for the other methods.
+But we notice, that the approach with pca (accuracy = 0.36) performs much worse than the approach without pca (accuracy = 0.56). so let's drop this approach for the other methods. 
 
 
 ```{r warning = FALSE}
@@ -216,6 +216,13 @@ model_rpart <- caret::train(dat_train[, -c(1, 2, 55)], dat_train$classe, method 
 end_rpart <- proc.time()
 pred_rpart <- predict(model_rpart, dat_test)
 (conf_rpart <- confusionMatrix(dat_test$classe, pred_rpart)$overall['Accuracy'])
+
+
+model_rpart_wo_cv <- caret::train(dat_train[, -c(1, 2, 55)], dat_train$classe, method = "rpart")
+pred_rpart_wo_cv <- predict(model_rpart_wo_cv, dat_test)
+(conf_rpart_wo_cv <- confusionMatrix(dat_test$classe, pred_rpart_wo_cv)$overall['Accuracy'])
+
+
 
 ```
 
@@ -263,7 +270,7 @@ pred_xgb <- predict(model_xgb, dat_test)
 
 xgBoost on its own performs outstanding. therefora combining all three methods won't result in better precidtion.
 
-```{r echo = FALSE}
+```{r warning = FALSE}
 
 
 # stack 
